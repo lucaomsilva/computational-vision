@@ -17,7 +17,7 @@ find_package(OpenCV REQUIRED)
 # For example, if you have exercise1.cpp and exercise2.cpp in your 'src' folder.
 set(EXERCISE_SOURCES
     src/main.cpp # The original test file
-    # src/exercise1.cpp
+    src/exercise_01.cpp
     # src/exercise2.cpp
 )
 
