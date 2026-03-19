@@ -23,6 +23,7 @@ set(EXERCISE_SOURCES
     src/exercise_04.cpp
     src/exercise_05.cpp
     src/exercise_06.cpp
+    src/exercise_07.cpp
 )
 
 # This loop goes through each file in the list above and creates a build target for it.
