@@ -43,6 +43,7 @@ install: ## OTHER: Install system dependencies (g++, OpenCV, etc.) on Fedora
 	@echo "WARNING: This will use 'sudo' to install packages. Please enter your password if prompted."
 	sudo dnf install -y \
 		@development-tools \
+		gcc-c++ \
 		cmake \
 		pkg-config \
 		opencv \
