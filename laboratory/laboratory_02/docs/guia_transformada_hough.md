@@ -58,7 +58,53 @@ As coordenadas `(a, b, r)` de cada pico que ultrapassa o limiar correspondem a u
 
 Para verificar o resultado, desenhe os círculos detectados (usando os parâmetros `a`, `b`, e `r` encontrados) sobre a imagem original.
 
-## Implementação Prática com OpenCV
+## Dicas para Implementação Manual (Do Zero)
+
+Se você estiver implementando a função `hough_transform` manualmente em vez de usar `cv::HoughCircles`, aqui estão algumas orientações técnicas para otimizar seu código:
+
+### 1. Representação do Acumulador
+Um acumulador 3D `[a][b][r]` pode consumir muita memória. 
+*   **Redução de Escala:** Você pode dividir as coordenadas `(a, b)` por um fator (ex: 2 ou 4) para reduzir o tamanho do acumulador, embora isso diminua a precisão.
+*   **Vetor Linearizado:** Para facilitar o acesso e gerenciamento, você pode usar um `std::vector<int>` de tamanho `width * height * num_radii` e calcular o índice manualmente: `index = a + (b * width) + (r_idx * width * height)`.
+
+### 2. Otimização de Trigonometria
+Calcular `sin(θ)` e `cos(θ)` dentro de loops triplos é extremamente lento.
+*   **Tabela de Seno/Cosseno (Look-up Table):** Antes de iniciar a votação, calcule os valores de seno e cosseno para cada ângulo de 0 a 360 e armazene-os em um vetor.
+```cpp
+std::vector<double> sinTable(360), cosTable(360);
+for (int theta = 0; theta < 360; theta++) {
+    double radian = theta * (CV_PI / 180.0);
+    sinTable[theta] = sin(radian);
+    cosTable[theta] = cos(radian);
+}
+```
+
+### 3. Loop de Votação
+Seu loop deve percorrer apenas os pixels que são bordas (resultado do Canny).
+```cpp
+for (int y = 0; y < edge_image.rows; y++) {
+    for (int x = 0; x < edge_image.cols; x++) {
+        if (edge_image.at<uchar>(y, x) > 0) { // Pixel de borda
+            for (int r = radius_min; r <= radius_max; r++) {
+                for (int theta = 0; theta < 360; theta++) {
+                    int a = x - cvRound(r * cosTable[theta]);
+                    int b = y - cvRound(r * sinTable[theta]);
+                    if (a >= 0 && a < width && b >= 0 && b < height) {
+                        accumulator[a][b][r]++;
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+### 4. Busca de Máximos Locais
+Para evitar detectar o mesmo círculo múltiplas vezes (picos vizinhos), você deve procurar por valores que são maiores que seus vizinhos em uma vizinhança (ex: 3x3x3 ou 5x5x5) e que ultrapassam um limiar de votos.
+
+---
+
+## Implementação Prática com OpenCV (Referência)
 
 Implementar a Transformada de Hough do zero é um ótimo exercício de aprendizado. No entanto, para aplicações práticas, o OpenCV fornece uma função otimizada e eficiente: `cv::HoughCircles`.
 
@@ -97,3 +143,4 @@ Espero que este guia seja útil para os seus estudos em Visão Computacional! Se
 <!--
 [PROMPT_SUGGESTION]Poderia me ajudar a refatorar o código em `main.cpp` para usar a função `detectCircles` que está no novo arquivo de documentação?[/PROMPT_SUGGESTION]
 [PROMPT_SUGGESTION]Como eu poderia ajustar os parâmetros da função `cv::HoughCircles` para detectar círculos de tamanhos diferentes na minha imagem?[/PROMPT_SUGGESTION]
+-->
