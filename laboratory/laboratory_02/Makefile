@@ -98,3 +98,15 @@ unzip: ## OTHER: Unzip the images file
 clean-unzip: ## OTHER: Remove the unzipped image directory
 	@echo "--- Cleaning up unzipped images ---"
 	@rm -rf img/sel_data
+
+.PHONY: create-output-dirs
+create-output-dirs: ## OTHER: Create the output directories
+	@echo "--- Creating the output directories---"
+	@mkdir -p img/output/gaussian
+	@mkdir -p img/output/median
+	@mkdir -p img/output/gray
+
+.PHONY: clean-output-images
+clean-output-images: ## OTHER: Remove the output files
+	@echo "--- Cleaning up output images ---"
+	@rm -rf img/output
