@@ -38,7 +38,7 @@ uint8_t save_process_image(Mat image, string process_image_path)
 }
 
 // TODO: Create my hough transform function
-void hough_transform(Mat image, vector<Circle> &best_circle, int radius_min, int radius_max)
+void hough_transform(Mat image, vector<Circle> &best_circle, int radius_min, int radius_max, const std::vector<double>& sinTable, const std::vector<double>& cosTable)
 {
   Mat gray;
   if (image.channels() == 3) {
@@ -47,18 +47,121 @@ void hough_transform(Mat image, vector<Circle> &best_circle, int radius_min, int
     gray = image;
   }
 
-  vector<Vec3f> circles;
-  HoughCircles(gray, circles, HOUGH_GRADIENT, 1,
-                gray.rows / 8,
-                100, 30,
-                radius_min, radius_max);
+  // 1. Edge Detection (Canny)
+  Mat edges;
+  Canny(gray, edges, 50, 100);
 
+  int width = edges.cols;
+  int height = edges.rows;
+  int num_radii = radius_max - radius_min + 1;
+
+  if (num_radii <= 0) return;
+
+  std::vector<std::vector<std::pair<int, int>>> circleOffsets(num_radii);
+  for (int r = radius_min; r <= radius_max; r++) {
+    int r_idx = r - radius_min;
+    // Use a temporary array to avoid duplicate voting for the same pixel
+    // To keep it simple and efficient, we can just use a 2D boolean array or std::set
+    // We will use a fast array approach to filter unique offsets
+    std::vector<std::pair<int, int>> unique_offsets;
+    std::vector<bool> seen((2 * r + 1) * (2 * r + 1), false);
+    int offset_center = r;
+    
+    for (int theta = 0; theta < 360; theta++) {
+      int da = cvRound(r * cosTable[theta]);
+      int db = cvRound(r * sinTable[theta]);
+      int seen_idx = (da + offset_center) + (db + offset_center) * (2 * r + 1);
+      if (!seen[seen_idx]) {
+        seen[seen_idx] = true;
+        unique_offsets.push_back({da, db});
+      }
+    }
+    circleOffsets[r_idx] = unique_offsets;
+  }
+
+  // 3. 3D Accumulator (Linearized)
+  int slice_size = width * height;
+  std::vector<int> accumulator(slice_size * num_radii, 0);
+
+  // 4. Voting Process
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      if (edges.at<uchar>(y, x) > 0) { // Edge pixel
+        for (int r = radius_min; r <= radius_max; r++) {
+          int r_idx = r - radius_min;
+          int r_offset = r_idx * slice_size;
+          for (const auto& offset : circleOffsets[r_idx]) {
+            int a = x - offset.first;
+            int b = y - offset.second;
+            if (a >= 0 && a < width && b >= 0 && b < height) {
+              accumulator[a + (b * width) + r_offset]++;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Circle Detection (Local Maxima)
+  int threshold = 30; 
+  std::vector<std::pair<int, Circle>> candidates;
+
+  for (int r = radius_min; r <= radius_max; r++) {
+    int r_idx = r - radius_min;
+    for (int b = 0; b < height; b++) {
+      for (int a = 0; a < width; a++) {
+        int idx = a + (b * width) + (r_idx * slice_size);
+        int votes = accumulator[idx];
+        if (votes >= threshold) {
+          bool is_max = true;
+          // Check 3x3x3 neighborhood
+          for (int dr = -1; dr <= 1; dr++) {
+            for (int db = -1; db <= 1; db++) {
+              for (int da = -1; da <= 1; da++) {
+                if (dr == 0 && db == 0 && da == 0) continue;
+                int nr = r_idx + dr, nb = b + db, na = a + da;
+                if (nr >= 0 && nr < num_radii && nb >= 0 && nb < height && na >= 0 && na < width) {
+                  int n_idx = na + (nb * width) + (nr * slice_size);
+                  if (accumulator[n_idx] > votes) {
+                    is_max = false;
+                    goto max_check_end;
+                  }
+                }
+              }
+            }
+          }
+          max_check_end:
+          if (is_max) {
+            Circle c;
+            c.center = Point(a, b);
+            c.radius = r;
+            candidates.push_back({votes, c});
+          }
+        }
+      }
+    }
+  }
+
+  // Sort candidates by votes in descending order
+  std::sort(candidates.begin(), candidates.end(), [](const std::pair<int, Circle>& a, const std::pair<int, Circle>& b) {
+    return a.first > b.first;
+  });
+
+  // Filter overlapping circles (min distance)
   best_circle.clear();
-  for (size_t i = 0; i < circles.size(); i++) {
-    Circle c;
-    c.center = Point(cvRound(circles[i][0]), cvRound(circles[i][1]));
-    c.radius = cvRound(circles[i][2]);
-    best_circle.push_back(c);
+  double min_dist = height / 8.0; 
+  for (const auto& cand : candidates) {
+    bool keep = true;
+    for (const auto& existing : best_circle) {
+      double dist = norm(cand.second.center - existing.center);
+      if (dist < min_dist) {
+        keep = false;
+        break;
+      }
+    }
+    if (keep) {
+      best_circle.push_back(cand.second);
+    }
   }
 }
 
@@ -76,6 +179,14 @@ int main()
 {
   string image_dir_path = "img/sel_data/";
   string output_dir_path = "img/output/";
+
+  // Pre-calculate Sine and Cosine
+  std::vector<double> sinTable(360), cosTable(360);
+  for (int theta = 0; theta < 360; theta++) {
+    double radian = theta * (CV_PI / 180.0);
+    sinTable[theta] = sin(radian);
+    cosTable[theta] = cos(radian);
+  }
 
   int images_lens = 1;
 
@@ -103,13 +214,13 @@ int main()
     processed_images.push_back({"median", median});
 
     for (auto& filter : processed_images) {
-      int min_radius = 100;
-      int max_radius = 250;
+      int min_radius = 190;
+      int max_radius = 220;
       int interval = 10;
       for (int radius_start = min_radius; radius_start <= max_radius; radius_start += interval) {
         for (int radius_end = radius_start + interval; radius_end <= max_radius; radius_end += interval) {
           vector<Circle> best_circle_hough;
-          hough_transform(filter.img, best_circle_hough, radius_start, radius_end);
+          hough_transform(filter.img, best_circle_hough, radius_start, radius_end, sinTable, cosTable);
 
           Mat image_circle = draw_circle(image, best_circle_hough, (int) best_circle_hough.size());
 
